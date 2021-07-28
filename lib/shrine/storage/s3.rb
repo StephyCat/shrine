@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'aes-everywhere'
 require "shrine"
 begin
   require "aws-sdk-s3"
@@ -67,7 +68,7 @@ class Shrine
       # [`Aws::S3::Bucket#presigned_post`]: http://docs.aws.amazon.com/sdk-for-ruby/v3/api/Aws/S3/Object.html#presigned_post-instance_method
       # [`Aws::S3::Client#initialize`]: http://docs.aws.amazon.com/sdk-for-ruby/v3/api/Aws/S3/Client.html#initialize-instance_method
       # [configuring AWS SDK]: https://docs.aws.amazon.com/sdk-for-ruby/v3/developer-guide/setup-config.html
-      def initialize(bucket:, client: nil, prefix: nil, host: nil, upload_options: {}, multipart_threshold: {}, signer: nil, public: nil, **s3_options)
+      def initialize(bucket:, client: nil, prefix: nil, host: nil, upload_options: {}, multipart_threshold: {}, signer: nil, public: nil, proxy_options: {}, **s3_options)
         raise ArgumentError, "the :bucket option is nil" unless bucket
 
         Shrine.deprecation("The :host option to Shrine::Storage::S3#initialize is deprecated and will be removed in Shrine 3. Pass :host to S3#url instead, you can also use default_url_options plugin.") if host
@@ -82,6 +83,7 @@ class Shrine
         @bucket = Aws::S3::Bucket.new(name: bucket, client: @client)
         @prefix = prefix
         @host = host
+        @proxy_options = proxy_options
         @upload_options = upload_options
         @multipart_threshold = multipart_threshold
         @signer = signer
@@ -221,8 +223,12 @@ class Shrine
 
         if method == :post
           presigned_post = object(id).presigned_post(options)
-
-          Struct.new(:method, :url, :fields).new(method, presigned_post.url, presigned_post.fields)
+          Struct.new(:method, :proxy_url, :url, :fields).new(
+            method,
+            @proxy_options[:upload_endpoint],
+            @proxy_options[:upload_endpoint] ? AES256.encrypt(presigned_post.url, @proxy_options[:aes_key]) : presigned_post.url,
+            presigned_post.fields
+          )
         else
           url = object(id).presigned_url(method, options)
 
